@@ -1,0 +1,97 @@
+:root {
+  --font-display: "Fredoka Variable", "Fredoka", "Segoe UI", system-ui, sans-serif;
+  --font-body: "Nunito Variable", "Nunito", "Segoe UI", system-ui, sans-serif;
+
+  /* Fallback palette (Slime Meadow); themes overwrite these at runtime. */
+  --bg-1: #f3fbe6;
+  --bg-2: #e6f6ff;
+  --surface: #ffffff;
+  --text: #24402c;
+  --primary: #6fd65a;
+  --shadow: 36 90 44;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: clip;
+}
+
+body {
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--text);
+  background: linear-gradient(170deg, var(--bg-1), var(--bg-2));
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  transition: background 0.4s, color 0.4s;
+}
+
+input {
+  user-select: text;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--primary) 60%, transparent);
+  outline-offset: 2px;
+}
+
+kbd {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 12.5px;
+  min-width: 26px;
+  padding: 3px 8px;
+  border-radius: 9px;
+  text-align: center;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: 0 2px 0 var(--border);
+}
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: 1;
+  height: 12px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--primary) var(--p, 0%), var(--surface-3) var(--p, 0%));
+  outline: none;
+  cursor: pointer;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 3px solid var(--primary-2);
+  box-shadow: 0 2px 6px rgb(var(--shadow) / 0.3);
+  transition: transform 0.15s;
+}
+input[type="range"]:active::-webkit-slider-thumb {
+  transform: scale(1.2);
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--muted) 45%, transparent);
+  border-radius: 999px;
+}
