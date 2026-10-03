@@ -4,6 +4,12 @@ A cute auto clicker for Windows, starring **Glorp** the green slime alien cat.
 
 Built with [Tauri 2](https://tauri.app) (Rust backend) and [Svelte 5](https://svelte.dev) (UI).
 
+## Download
+
+**[⬇ Get the latest installer](https://github.com/xburrito64/glorp-auto-clicker/releases/latest)**: run the
+`setup.exe`, and Glorp appears in your Start menu. If Windows shows "Windows protected your PC", click
+**More info → Run anyway** (the app just isn't code-signed).
+
 ## Features
 
 - Click interval in ms, seconds or clicks-per-second, with speed presets
