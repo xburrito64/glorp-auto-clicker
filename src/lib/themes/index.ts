@@ -3,6 +3,8 @@
 // `mascot` at a different character component in its own folder.
 import type { Component } from "svelte";
 import Glorp from "./glorp/Glorp.svelte";
+import { glorpLines, type Lines } from "./glorp/lines";
+import type { Expression } from "$lib/expression";
 import type { Mood } from "$lib/types";
 
 export interface MascotProps {
@@ -11,6 +13,10 @@ export interface MascotProps {
   cps: number;
   /** Where the pointer is relative to the mascot, each axis in -1..1. */
   look: { x: number; y: number };
+  /** A reaction's face, overriding the mood's default face. */
+  expression?: Expression | null;
+  /** True while the mascot is being squeezed (mouse held down on it). */
+  held?: boolean;
 }
 
 export interface Theme {
@@ -19,6 +25,8 @@ export interface Theme {
   blurb: string;
   dark: boolean;
   mascot: Component<MascotProps>;
+  /** What the mascot says (and the faces it makes). */
+  lines: Lines;
   /** CSS custom properties (without the leading `--`). */
   vars: Record<string, string>;
 }
@@ -41,6 +49,7 @@ export const themes: Theme[] = [
     blurb: "fresh, minty, very glorp",
     dark: false,
     mascot: Glorp,
+    lines: glorpLines,
     vars: {
       ...glorpGreen,
       "bg-1": "#f3fbe6",
@@ -72,6 +81,7 @@ export const themes: Theme[] = [
     blurb: "glorp's home planet, after dark",
     dark: true,
     mascot: Glorp,
+    lines: glorpLines,
     vars: {
       ...glorpGreen,
       "glorp-light": "#e2ffae",
@@ -108,6 +118,7 @@ export const themes: Theme[] = [
     blurb: "glorp's pink cousin, glorpina",
     dark: false,
     mascot: Glorp,
+    lines: glorpLines,
     vars: {
       "glorp-light": "#ffe0f0",
       "glorp-mid": "#ffa6d2",

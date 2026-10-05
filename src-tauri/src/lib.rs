@@ -1,6 +1,7 @@
 mod clicker;
 mod input;
 mod settings;
+mod stats;
 
 use serde::Serialize;
 use std::{
@@ -22,6 +23,7 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 use clicker::Clicker;
 use settings::Settings;
+use stats::{LifetimeStats, Session};
 
 const TRAY_ID: &str = "glorp-tray";
 const AUTOSTART_FLAG: &str = "--minimized";
@@ -30,6 +32,7 @@ const TRAY_ACTIVE: &[u8] = include_bytes!("../icons/tray-active.png");
 
 struct AppState {
     settings: Mutex<Settings>,
+    stats: Mutex<LifetimeStats>,
     clicker: Clicker,
     /// Set while the user is picking a screen position (hotkey is ignored meanwhile).
     picking: Arc<AtomicBool>,
@@ -56,6 +59,18 @@ struct PickPayload {
 pub(crate) fn notify_state(app: &AppHandle, running: bool, reason: &'static str) {
     let _ = app.emit("clicker-state", StatePayload { running, reason });
     refresh_tray(app, running);
+}
+
+/// Adds a finished run to the lifetime stats, saves them, and tells the UI.
+pub(crate) fn record_session(app: &AppHandle, session: Session) {
+    let state = app.state::<AppState>();
+    let snapshot = {
+        let mut stats = state.stats.lock().unwrap();
+        stats.record(&session);
+        stats.clone()
+    };
+    let _ = stats::save(app, &snapshot);
+    let _ = app.emit("stats-updated", snapshot);
 }
 
 fn refresh_tray(app: &AppHandle, running: bool) {
@@ -237,6 +252,32 @@ fn pick_location(app: AppHandle) {
     });
 }
 
+#[tauri::command]
+fn get_stats(state: tauri::State<AppState>) -> LifetimeStats {
+    state.stats.lock().unwrap().clone()
+}
+
+#[tauri::command]
+fn reset_stats(app: AppHandle) -> Result<LifetimeStats, String> {
+    let fresh = LifetimeStats::default();
+    *app.state::<AppState>().stats.lock().unwrap() = fresh.clone();
+    stats::save(&app, &fresh)?;
+    Ok(fresh)
+}
+
+/// Someone poked Glorp. This is important data.
+#[tauri::command]
+fn record_poke(app: AppHandle) -> u64 {
+    let state = app.state::<AppState>();
+    let snapshot = {
+        let mut stats = state.stats.lock().unwrap();
+        stats.pokes += 1;
+        stats.clone()
+    };
+    let _ = stats::save(&app, &snapshot);
+    snapshot.pokes
+}
+
 /// Called by the UI once it has rendered, so the window never flashes blank.
 #[tauri::command]
 fn frontend_ready(app: AppHandle) {
@@ -345,6 +386,7 @@ pub fn run() {
             let hotkey = settings.hotkey.clone();
             app.manage(AppState {
                 settings: Mutex::new(settings),
+                stats: Mutex::new(stats::load(&handle)),
                 clicker: Clicker::default(),
                 picking: Arc::new(AtomicBool::new(false)),
                 hotkey_suspended: AtomicBool::new(false),
@@ -387,6 +429,9 @@ pub fn run() {
             suspend_hotkey,
             pick_location,
             frontend_ready,
+            get_stats,
+            reset_stats,
+            record_poke,
             hide_window,
             quit_app,
         ])

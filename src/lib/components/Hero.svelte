@@ -1,5 +1,6 @@
 <script lang="ts">
   import { untrack } from "svelte";
+  import type { Expression } from "$lib/expression";
   import type { Theme } from "$lib/themes";
   import type { Mood } from "$lib/types";
 
@@ -8,17 +9,87 @@
     mood,
     cps,
     speech,
+    expression,
     pulse,
     onpoke,
+    onpet,
+    onsqueeze,
   }: {
     theme: Theme;
     mood: Mood;
     cps: number;
     speech: string;
+    expression: Expression | null;
     /** Increments whenever new clicks happened, to spawn little click rings. */
     pulse: number;
     onpoke: () => void;
+    /** Mouse rubbed back and forth over the mascot. */
+    onpet: () => void;
+    /** "long" fires while still held; "release" when a long squeeze is let go. */
+    onsqueeze: (phase: "long" | "release") => void;
   } = $props();
+
+  // ---- squeezing: hold the mouse down on the mascot
+  const LONG_PRESS_MS = 650;
+  let held = $state(false);
+  let longPress = false;
+  let skipNextClick = false;
+  let holdTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function pressDown(e: PointerEvent) {
+    if (e.button !== 0) return;
+    held = true;
+    longPress = false;
+    clearTimeout(holdTimer);
+    holdTimer = setTimeout(() => {
+      longPress = true;
+      onsqueeze("long");
+    }, LONG_PRESS_MS);
+  }
+
+  function pressUp() {
+    if (!held) return;
+    held = false;
+    clearTimeout(holdTimer);
+    if (longPress) {
+      skipNextClick = true;
+      onsqueeze("release");
+    }
+  }
+
+  function clicked() {
+    if (skipNextClick) {
+      skipNextClick = false;
+      return;
+    }
+    onpoke();
+  }
+
+  // ---- petting: rub the mouse left and right over the mascot
+  const PET_FLIPS = 4;
+  let petX = 0;
+  let petDir = 0;
+  let petFlips: number[] = [];
+  let petCooldownUntil = 0;
+
+  function rub(e: PointerEvent) {
+    if (held || e.buttons) return;
+    const dx = e.clientX - petX;
+    if (Math.abs(dx) < 10) return;
+    const dir = Math.sign(dx);
+    const now = performance.now();
+    if (petDir !== 0 && dir !== petDir) {
+      petFlips = petFlips.filter((t) => now - t < 1400);
+      petFlips.push(now);
+      if (petFlips.length >= PET_FLIPS && now > petCooldownUntil) {
+        petFlips = [];
+        petCooldownUntil = now + 3500;
+        onpet();
+      }
+    }
+    petDir = dir;
+    petX = e.clientX;
+  }
 
   let stage: HTMLDivElement;
   let look = $state({ x: 0, y: 0 });
@@ -87,8 +158,18 @@
     {#each rings as r (r.id)}
       <span class="ring" style="left:{r.x}%"></span>
     {/each}
-    <button type="button" class="poke" onclick={onpoke} aria-label="Poke Glorp">
-      <Mascot {mood} {cps} {look} />
+    <button
+      type="button"
+      class="poke"
+      onclick={clicked}
+      onpointerdown={pressDown}
+      onpointerup={pressUp}
+      onpointerleave={pressUp}
+      onpointercancel={pressUp}
+      onpointermove={rub}
+      aria-label="Poke Glorp (hold to squish, rub to pet)"
+    >
+      <Mascot {mood} {cps} {look} {expression} {held} />
     </button>
   </div>
 </div>
@@ -133,7 +214,10 @@
     top: 14px;
     left: 50%;
     transform: translateX(-50%);
-    max-width: 82%;
+    width: max-content;
+    max-width: 300px;
+    text-align: center;
+    line-height: 1.25;
     background: var(--bubble);
     color: var(--text);
     font-family: var(--font-display);
@@ -142,7 +226,6 @@
     padding: 7px 14px;
     border-radius: 18px;
     box-shadow: 0 4px 14px -4px rgb(var(--shadow) / 0.25);
-    white-space: nowrap;
     z-index: 2;
     transition: transform 0.2s;
   }

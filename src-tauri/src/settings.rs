@@ -22,6 +22,7 @@ pub enum ClickKind {
 pub enum RepeatMode {
     Forever,
     Count,
+    Time,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -44,6 +45,10 @@ pub struct Settings {
     pub click_kind: ClickKind,
     pub repeat_mode: RepeatMode,
     pub repeat_count: u64,
+    /// How long to click for when `repeat_mode` is `Time`.
+    pub duration_secs: f64,
+    /// UI-only: preferred unit for the duration ("s" | "min" | "h").
+    pub duration_unit: String,
     pub position_mode: PositionMode,
     pub fixed_x: i32,
     pub fixed_y: i32,
@@ -63,6 +68,8 @@ impl Default for Settings {
             click_kind: ClickKind::Single,
             repeat_mode: RepeatMode::Forever,
             repeat_count: 100,
+            duration_secs: 60.0,
+            duration_unit: "min".into(),
             position_mode: PositionMode::Cursor,
             fixed_x: 0,
             fixed_y: 0,
@@ -83,6 +90,10 @@ impl Settings {
         self.interval_ms = self.interval_ms.clamp(1.0, 24.0 * 3600.0 * 1000.0);
         self.jitter_pct = self.jitter_pct.min(90);
         self.repeat_count = self.repeat_count.max(1);
+        if !self.duration_secs.is_finite() {
+            self.duration_secs = 60.0;
+        }
+        self.duration_secs = self.duration_secs.clamp(1.0, 7.0 * 24.0 * 3600.0);
         self
     }
 }

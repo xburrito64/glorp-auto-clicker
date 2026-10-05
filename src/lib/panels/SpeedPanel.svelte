@@ -2,7 +2,8 @@
   import Card from "$lib/components/Card.svelte";
   import NumberField from "$lib/components/NumberField.svelte";
   import Segmented from "$lib/components/Segmented.svelte";
-  import type { IntervalUnit, Settings } from "$lib/types";
+  import type { DurationUnit, IntervalUnit, Settings } from "$lib/types";
+  import { fmtDuration } from "$lib/format";
 
   let { settings = $bindable() }: { settings: Settings } = $props();
 
@@ -13,6 +14,14 @@
     s: { min: 0.001, max: MAX_MS / 1000, step: 0.1, decimals: 3, suffix: "sec", to: (ms: number) => ms / 1000, from: (v: number) => v * 1000 },
     cps: { min: 0.01, max: 1000, step: 1, decimals: 2, suffix: "/ sec", to: (ms: number) => 1000 / ms, from: (v: number) => 1000 / v },
   } satisfies Record<IntervalUnit, unknown>;
+
+  const MAX_DURATION = 7 * 24 * 3600;
+  const durationCfg = {
+    s: { factor: 1, step: 10, decimals: 0, suffix: "sec" },
+    min: { factor: 60, step: 1, decimals: 1, suffix: "min" },
+    h: { factor: 3600, step: 0.5, decimals: 2, suffix: "hours" },
+  } satisfies Record<DurationUnit, unknown>;
+  const dcfg = $derived(durationCfg[settings.durationUnit]);
 
   const cfg = $derived(unitCfg[settings.intervalUnit]);
   const cps = $derived(1000 / settings.intervalMs);
@@ -93,10 +102,39 @@
     bind:value={settings.repeatMode}
     options={[
       { value: "forever", label: "Until stopped" },
-      { value: "count", label: "Set amount" },
+      { value: "count", label: "Clicks" },
+      { value: "time", label: "Time" },
     ]}
   />
-  {#if settings.repeatMode === "count"}
+  {#if settings.repeatMode === "time"}
+    <div class="duration">
+      <NumberField
+        label="Click for"
+        value={settings.durationSecs / dcfg.factor}
+        min={1 / dcfg.factor}
+        max={MAX_DURATION / dcfg.factor}
+        step={dcfg.step}
+        decimals={dcfg.decimals}
+        suffix={dcfg.suffix}
+        onchange={(v) => (settings.durationSecs = Math.min(MAX_DURATION, Math.max(1, Math.round(v * dcfg.factor))))}
+      />
+      <Segmented
+        small
+        label="Duration unit"
+        bind:value={settings.durationUnit}
+        options={[
+          { value: "s", label: "sec" },
+          { value: "min", label: "min" },
+          { value: "h", label: "hrs" },
+        ]}
+      />
+    </div>
+    <p class="summary">
+      Glorp clicks for {fmtDuration(settings.durationSecs)}, about {Math.floor(
+        settings.durationSecs * cps,
+      ).toLocaleString()} clicks.
+    </p>
+  {:else if settings.repeatMode === "count"}
     <div class="count">
       <NumberField
         label="Number of clicks"
@@ -180,5 +218,15 @@
   }
   .count {
     margin-top: 10px;
+  }
+  .duration {
+    display: grid;
+    grid-template-columns: 1fr 138px;
+    gap: 8px;
+    align-items: center;
+    margin-top: 10px;
+  }
+  .duration + .summary {
+    margin-bottom: 0;
   }
 </style>

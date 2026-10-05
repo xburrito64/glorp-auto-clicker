@@ -15,7 +15,11 @@ Built with [Tauri 2](https://tauri.app) (Rust backend) and [Svelte 5](https://sv
 - Click interval in ms, seconds or clicks-per-second, with speed presets
 - "Wobble": random timing variation, so clicks look more human
 - Left / middle / right button, single or double click
-- Click forever or a set number of times
+- Click forever, a set number of times, or for a set amount of time
+- **Drift-free timing**: clicks follow a fixed timetable and course-correct after every click,
+  so 100 CPS really is 100 CPS, even when Windows lags or Glorp is hidden in the tray
+- **Stats page**: total clicks, time spent clicking, sessions, top speed, timing accuracy,
+  CPU use, clicks per day, and some fun facts
 - Follow the mouse, or click a fixed spot (with an on-screen picker)
 - Global start/stop hotkey (default **F6**), can be changed in the app
 - Closing the window hides Glorp in the system tray (the hidden icons next to the clock)
@@ -37,6 +41,7 @@ src-tauri/src/
   clicker.rs              the click engine (background thread, precise timing)
   input.rs                Win32 SendInput / cursor helpers
   settings.rs             settings + saving to %APPDATA%\com.glorp.clicker
+  stats.rs                lifetime stats (stats.json in the same folder)
   lib.rs                  tray, hotkey, window, commands
 scripts/make-icons.mjs    renders Glorp into the app + tray icons
 ```
@@ -60,6 +65,18 @@ output elsewhere with a local, git-ignored `src-tauri/.cargo/config.toml`:
 [build]
 target-dir = "C:/some/folder/outside/onedrive"
 ```
+
+## Timing tests & diagnostics
+
+```bash
+cd src-tauri
+cargo test --lib -- --nocapture                    # engine accuracy tests (with simulated lag)
+cargo test --lib naive -- --ignored --nocapture    # how a naive clicker drifts, for comparison
+cargo test --lib latency -- --ignored --nocapture  # how long each Windows call takes on this PC
+```
+
+Start the app with the environment variable `GLORP_TIMING_LOG=1` to get a `timing-log.txt` in
+`%APPDATA%\com.glorp.clicker` after each run (actual vs target speed, oversleep, time per step).
 
 ## Adding a theme
 

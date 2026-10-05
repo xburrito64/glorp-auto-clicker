@@ -6,16 +6,26 @@
   import { api, on } from "$lib/api";
   import { applyTheme, getTheme } from "$lib/themes";
   import { hotkeyParts, prettyHotkey } from "$lib/hotkeys";
-  import { DEFAULT_SETTINGS, type Mood, type Settings } from "$lib/types";
+  import { DEFAULT_SETTINGS, EMPTY_STATS, type LifetimeStats, type Mood, type Settings } from "$lib/types";
+  import { F, MOOD_FACES, type Expression, type LineContext, type Reaction } from "$lib/expression";
+  import { lineText } from "$lib/themes/glorp/lines";
+  import { Brain, lineDuration } from "$lib/brain";
+  import { fmtClock, fmtCps } from "$lib/format";
   import TitleBar from "$lib/components/TitleBar.svelte";
   import Hero from "$lib/components/Hero.svelte";
   import Icon from "$lib/components/Icon.svelte";
   import SpeedPanel from "$lib/panels/SpeedPanel.svelte";
   import MousePanel from "$lib/panels/MousePanel.svelte";
   import GlorpPanel from "$lib/panels/GlorpPanel.svelte";
+  import StatsPanel from "$lib/panels/StatsPanel.svelte";
 
   const COUNTDOWN_FROM = 3;
   const SLEEP_AFTER_MS = 60_000;
+  /** Random idle chatter happens every IDLE_MIN..IDLE_MAX ms while nothing else is going on. */
+  const IDLE_MIN = 14_000;
+  const IDLE_MAX = 30_000;
+  const CLICK_LINE_EVERY = 3_200;
+  const MILESTONES = [100, 1_000, 5_000, 10_000, 50_000, 100_000, 500_000, 1_000_000, 10_000_000];
 
   let settings = $state<Settings>({ ...DEFAULT_SETTINGS });
   let loaded = $state(false);
@@ -25,45 +35,129 @@
   let pulse = $state(0);
   let picking = $state(false);
   let hovering = $state(true);
-  let tab = $state<"speed" | "mouse" | "glorp">("speed");
+  let tab = $state<"speed" | "mouse" | "stats" | "glorp">("speed");
+  let lifetime = $state<LifetimeStats>({ ...EMPTY_STATS });
+  let avgCps = $state(0);
+  let runStartedAt = $state(0);
+  let clock = $state(Date.now());
+  let clockTimer: ReturnType<typeof setInterval> | undefined;
 
   const cps = new Tween(0, { duration: 300, easing: cubicOut });
 
-  // Short-lived moods/lines (poke reactions, errors, celebrations) override the default ones.
-  let flash = $state<{ mood?: Mood; text?: string } | null>(null);
+  const theme = $derived(getTheme(settings.theme));
+  $effect(() => applyTheme(theme));
+  const brain = new Brain(getTheme(DEFAULT_SETTINGS.theme).lines);
+  $effect(() => {
+    brain.lines = theme.lines;
+  });
+
+  const ctx = (): LineContext => ({
+    hotkey: prettyHotkey(settings.hotkey),
+    cps: cps.target,
+    clicks,
+    total: lifetime.totalClicks,
+    pokes: lifetime.pokes,
+    milestone: 0,
+  });
+
+  // ---------------------------------------------------------------- reactions
+
+  // A short-lived line + face (poke reactions, errors, celebrations) shown over the defaults.
+  let flash = $state<{ text: string; face: Expression; mood?: Mood } | null>(null);
   let flashTimer: ReturnType<typeof setTimeout> | undefined;
-  function say(text: string, ms = 2600, mood?: Mood) {
+  let faceId = 0;
+  let nextIdleAt = Date.now() + IDLE_MIN;
+
+  function react(r: Reaction, extra: Partial<LineContext> = {}) {
+    const text = lineText(r, { ...ctx(), ...extra });
     clearTimeout(flashTimer);
-    flash = { text, mood };
-    flashTimer = setTimeout(() => (flash = null), ms);
+    flash = { text, face: { ...r.face, id: ++faceId } };
+    flashTimer = setTimeout(() => (flash = null), lineDuration(r, text));
+    nextIdleAt = Date.now() + IDLE_MIN + Math.random() * (IDLE_MAX - IDLE_MIN);
+  }
+
+  /** Quick helper for one-off lines that only need a mood's face. */
+  function say(text: string, ms = 2600, mood: Mood = "idle") {
+    react({ text, face: MOOD_FACES[mood], ms });
+  }
+
+  // Rotating lines while clicking.
+  let runLine = $state<Reaction | null>(null);
+  let lastRunLineAt = 0;
+  function nextRunLine() {
+    const l = theme.lines;
+    const speed = cps.target || avgCps;
+    runLine =
+      speed >= 50 ? brain.pick("turbo", l.turbo) : speed > 0 && speed < 1 ? brain.pick("slow", l.slow) : brain.pick("clicking", l.clicking);
   }
 
   let lastActivity = $state(Date.now());
   let now = $state(Date.now());
-
-  const theme = $derived(getTheme(settings.theme));
-  $effect(() => applyTheme(theme));
+  const sleepy = $derived(!running && countdown === 0 && now - lastActivity > SLEEP_AFTER_MS);
 
   const mood = $derived.by<Mood>(() => {
     if (countdown > 0) return "countdown";
     if (running) return "clicking";
     if (flash?.mood) return flash.mood;
-    if (now - lastActivity > SLEEP_AFTER_MS) return "sleepy";
+    if (sleepy && !flash) return "sleepy";
     return "idle";
+  });
+
+  const expression = $derived.by<Expression | null>(() => {
+    if (countdown > 0) return null;
+    if (flash) return flash.face;
+    if (running && hovering && settings.positionMode === "cursor") return F("wide", "o", { fx: ["question"] });
+    if (running && runLine) return runLine.face;
+    return null;
   });
 
   const hotkeyLabel = $derived(prettyHotkey(settings.hotkey));
 
   const speech = $derived.by(() => {
-    if (countdown > 0) return settings.positionMode === "cursor" ? `${countdown}… point me at the spot!` : `${countdown}…`;
+    if (countdown > 0) {
+      if (countdown === 3) return "3… get ready!";
+      if (countdown === 2) return settings.positionMode === "cursor" ? "2… point me at the spot!" : "2…";
+      return "1… here we go!";
+    }
+    if (flash) return flash.text;
     if (running && hovering && settings.positionMode === "cursor") return "move off my window to glorp!";
-    if (flash?.text) return flash.text;
-    if (running) return cps.target >= 1 ? `glorp glorp! ${Math.round(cps.target)}/sec` : "glorp… glorp…";
+    if (running && runLine) return lineText(runLine, ctx());
+    if (running) return "glorp glorp!";
     if (mood === "sleepy") return "zzz… glorp…";
     return `press ${hotkeyLabel} and i'll glorp!`;
   });
 
-  const remaining = $derived(settings.repeatMode === "count" ? Math.max(0, settings.repeatCount - clicks) : null);
+  const remaining = $derived.by(() => {
+    if (settings.repeatMode === "count") {
+      return { label: "left", value: Math.max(0, settings.repeatCount - clicks).toLocaleString() };
+    }
+    if (settings.repeatMode === "time") {
+      const left = running ? settings.durationSecs - (clock - runStartedAt) / 1000 : settings.durationSecs;
+      return { label: "time left", value: fmtClock(left) };
+    }
+    return { label: "repeat", value: "∞" };
+  });
+
+  function poke() {
+    react(brain.poke(Date.now(), sleepy));
+    wake();
+    api.recordPoke().then((n) => (lifetime.pokes = n)).catch(() => {});
+  }
+
+  function pet() {
+    if (running || brain.isGrumpy(Date.now())) return;
+    react(brain.pick("pet", theme.lines.pet));
+  }
+
+  function squeeze(phase: "long" | "release") {
+    if (phase === "long") react({ ...brain.pick("holdLong", theme.lines.holdLong), ms: 60_000 });
+    else react(brain.pick("holdRelease", theme.lines.holdRelease));
+  }
+
+  function wake() {
+    lastActivity = Date.now();
+    now = lastActivity;
+  }
 
   // ---------------------------------------------------------------- persistence
 
@@ -84,14 +178,23 @@
     }, 250);
   });
 
+  // React to a new theme (but not to the theme loading at startup).
+  let shownTheme = "";
+  $effect(() => {
+    const id = settings.theme;
+    if (!loaded) return;
+    if (shownTheme && shownTheme !== id) react(brain.pick("themeChange", theme.lines.themeChange));
+    shownTheme = id;
+  });
+
   async function changeHotkey(accel: string): Promise<string | null> {
     try {
       const saved = await api.updateSettings({ ...$state.snapshot(settings), hotkey: accel } as Settings);
       settings.hotkey = saved.hotkey;
-      say(`new hotkey: ${prettyHotkey(accel)}!`, 2200, "celebrate");
+      react({ text: `new hotkey: ${prettyHotkey(accel)}!`, face: F("star", "grin", { anim: "hop", fx: ["sparkles"] }) });
       return null;
     } catch (e) {
-      say("that key is taken :(", 2600, "sad");
+      react({ text: "that key is taken :(", face: F("teary", "frown", { brows: "worried", anim: "shake" }) });
       return String(e);
     }
   }
@@ -112,10 +215,11 @@
     }
     if (countdown > 0) {
       cancelCountdown();
-      say("okay, never mind!", 1800);
+      react({ text: "okay, never mind!", face: F("happy", "cat", { anim: "nod" }) });
       return;
     }
     // Give the user a moment to move the mouse where the clicks should go.
+    flash = null;
     countdown = COUNTDOWN_FROM;
     countdownTimer = setInterval(async () => {
       countdown -= 1;
@@ -129,22 +233,8 @@
   function pickSpot() {
     if (picking) return;
     picking = true;
-    say("hiding! click the spot you want", 900);
+    react({ text: "hiding! click the spot you want", face: F("wink", "grin"), ms: 900 });
     setTimeout(() => api.pickLocation(), 700);
-  }
-
-  function poke() {
-    const lines = [
-      "blorp!",
-      "hehe, that tickles",
-      "i'm 97% slime",
-      "*jiggles*",
-      "boop received",
-      "meow? i mean… glorp.",
-      "greetings from planet glorpulon",
-      "please do not eat me",
-    ];
-    say(lines[Math.floor(Math.random() * lines.length)], 1600, "poked");
   }
 
   onMount(() => {
@@ -153,28 +243,55 @@
     unlisten.push(
       on("clicker-state", ({ running: r, reason }) => {
         running = r;
+        clearInterval(clockTimer);
         if (r) {
           cancelCountdown();
+          flash = null;
           clicks = 0;
+          avgCps = 0;
           cps.set(0, { duration: 0 });
+          runStartedAt = Date.now();
+          clock = runStartedAt;
+          runLine = null;
+          clockTimer = setInterval(() => {
+            clock = Date.now();
+            if (!runLine || clock - lastRunLineAt > CLICK_LINE_EVERY) {
+              lastRunLineAt = clock;
+              nextRunLine();
+            }
+          }, 250);
         } else {
           cps.target = 0;
-          if (reason === "done") say(`all done! ${clicks.toLocaleString()} clicks`, 3000, "celebrate");
+          wake();
+          const l = theme.lines;
+          if (reason === "done") {
+            react(settings.repeatMode === "time" ? brain.pick("timeUp", l.timeUp) : brain.pick("done", l.done));
+          } else if (clicks > 0) {
+            react(brain.pick("stopped", l.stopped));
+          }
         }
       }),
       on("clicker-stats", (s) => {
         if (s.clicks !== clicks) pulse += 1;
         clicks = s.clicks;
         cps.target = s.cps;
+        if (s.avgCps > 0) avgCps = s.avgCps;
+      }),
+      on("stats-updated", (s) => {
+        const before = lifetime.totalClicks;
+        lifetime = s;
+        const hit = MILESTONES.filter((m) => before < m && s.totalClicks >= m).pop();
+        // Let the "done" line show first, then party.
+        if (hit) setTimeout(() => react(brain.pick("milestone", theme.lines.milestone), { milestone: hit }), 3000);
       }),
       on("pick-result", (p) => {
         picking = false;
         if (p) {
           settings.fixedX = p.x;
           settings.fixedY = p.y;
-          say(`got it! (${p.x}, ${p.y})`, 2200, "celebrate");
+          react({ text: `got it! (${p.x}, ${p.y})`, face: F("star", "grin", { anim: "hop", fx: ["sparkles"] }) });
         } else {
-          say("never mind then!", 1800);
+          react({ text: "never mind then!", face: F("happy", "cat", { anim: "nod" }) });
         }
       }),
     );
@@ -184,6 +301,7 @@
         settings = await api.getSettings();
         lastSaved = { ...settings };
         running = await api.isRunning();
+        lifetime = await api.getStats();
       } catch {
         /* keep defaults */
       }
@@ -191,13 +309,33 @@
       loaded = true;
       // Let the first frame paint before showing the window.
       requestAnimationFrame(() => requestAnimationFrame(() => api.ready()));
+      setTimeout(() => react(brain.pick("greeting", theme.lines.greeting(new Date().getHours()))), 500);
     })();
 
-    const tick = setInterval(() => (now = Date.now()), 5000);
-    const wake = () => {
-      lastActivity = Date.now();
-      now = lastActivity;
+    // Once a second: sleepiness, forgiving after a grumpy spell, and random idle chatter.
+    const tick = setInterval(() => {
+      now = Date.now();
+      const sorry = brain.maybeForgive(now);
+      if (sorry) {
+        react(sorry);
+        return;
+      }
+      const busy = running || countdown > 0 || picking || flash || sleepy || document.hidden;
+      if (!busy && now > nextIdleAt) react(brain.pick("idle", theme.lines.idle));
+    }, 1000);
+
+    // Say hi again when the window comes back from the tray.
+    let hiddenAt = 0;
+    const visibility = () => {
+      if (document.hidden) {
+        hiddenAt = Date.now();
+      } else if (hiddenAt && Date.now() - hiddenAt > 20_000 && !running) {
+        wake();
+        react(brain.pick("welcomeBack", theme.lines.welcomeBack));
+      }
     };
+    document.addEventListener("visibilitychange", visibility);
+
     const noMenu = (e: MouseEvent) => {
       if (!(e.target instanceof HTMLInputElement)) e.preventDefault();
     };
@@ -212,7 +350,9 @@
     return () => {
       unlisten.forEach((p) => p.then((u) => u()));
       clearInterval(tick);
+      clearInterval(clockTimer);
       cancelCountdown();
+      document.removeEventListener("visibilitychange", visibility);
       window.removeEventListener("pointermove", wake);
       window.removeEventListener("keydown", wake);
       document.removeEventListener("contextmenu", noMenu);
@@ -224,6 +364,7 @@
   const tabs = [
     { id: "speed", label: "Speed", icon: "clock" },
     { id: "mouse", label: "Mouse", icon: "cursor" },
+    { id: "stats", label: "Stats", icon: "chart" },
     { id: "glorp", label: "Glorp", icon: "sparkle" },
   ] as const;
   const tabIndex = $derived(tabs.findIndex((t) => t.id === tab));
@@ -232,7 +373,7 @@
 <div class="app" class:ready={loaded}>
   <TitleBar {running} />
 
-  <Hero {theme} {mood} cps={cps.current} {speech} {pulse} onpoke={poke} />
+  <Hero {theme} {mood} cps={cps.current} {speech} {expression} {pulse} onpoke={poke} onpet={pet} onsqueeze={squeeze} />
 
   <div class="controls">
     <button
@@ -263,12 +404,12 @@
         <span class="value">{clicks.toLocaleString()}</span>
       </div>
       <div class="stat">
-        <span class="label">speed</span>
-        <span class="value">{cps.current >= 10 ? Math.round(cps.current) : cps.current.toFixed(1)}<small>/s</small></span>
+        <span class="label">avg speed</span>
+        <span class="value">{fmtCps(avgCps)}<small>/s</small></span>
       </div>
       <div class="stat">
-        <span class="label">{remaining === null ? "repeat" : "left"}</span>
-        <span class="value">{remaining === null ? "∞" : remaining.toLocaleString()}</span>
+        <span class="label">{remaining.label}</span>
+        <span class="value">{remaining.value}</span>
       </div>
     </div>
   </div>
@@ -289,6 +430,8 @@
           <SpeedPanel bind:settings />
         {:else if tab === "mouse"}
           <MousePanel bind:settings {picking} onpick={pickSpot} />
+        {:else if tab === "stats"}
+          <StatsPanel stats={lifetime} onreset={async () => (lifetime = await api.resetStats())} />
         {:else}
           <GlorpPanel bind:settings onhotkey={changeHotkey} onquit={() => api.quit()} />
         {/if}
@@ -438,7 +581,7 @@
   .tabs {
     position: relative;
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(4, 1fr);
     margin: 12px 12px 0;
     padding: 4px;
     background: var(--surface-3);
@@ -450,7 +593,7 @@
     top: 4px;
     bottom: 4px;
     left: 4px;
-    width: calc((100% - 8px) / 3);
+    width: calc((100% - 8px) / 4);
     transform: translateX(calc(100% * var(--i)));
     background: var(--surface);
     border-radius: 14px;
@@ -462,11 +605,11 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
+    gap: 5px;
     font: inherit;
     font-family: var(--font-display);
     font-weight: 600;
-    font-size: 14px;
+    font-size: 13.5px;
     color: var(--text-soft);
     background: none;
     border: 0;

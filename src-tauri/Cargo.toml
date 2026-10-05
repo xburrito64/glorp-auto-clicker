@@ -1,6 +1,6 @@
 [package]
 name = "glorp-clicker"
-version = "0.1.0"
+version = "0.2.0"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -25,7 +25,8 @@ tauri-plugin-global-shortcut = "2.4.0"
 tauri-plugin-single-instance = "2.5.0"
 tauri-plugin-autostart = "2.6.0"
 fastrand = "2.5.0"
-windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_Media"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_Media", "Win32_System_Threading"] }
+chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

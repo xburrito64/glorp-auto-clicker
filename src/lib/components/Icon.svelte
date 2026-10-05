@@ -16,6 +16,9 @@
     stop: "M7 7h10v10H7z",
     tray: "M4 14h4l2 3h4l2-3h4 M4 14V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8 M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4",
     cursor: "M5 3l14 7-6 2-2 6z",
+    chart: "M5 20v-6 M12 20V5 M19 20v-10",
+    trophy: "M8 4h8v5a4 4 0 0 1-8 0z M8 6H5a3 3 0 0 0 3 4 M16 6h3a3 3 0 0 1-3 4 M12 13v4 M9 20h6",
+    calendar: "M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z M4 10h16 M9 3v4 M15 3v4",
   } as const;
   export type IconName = keyof typeof paths;
 </script>
